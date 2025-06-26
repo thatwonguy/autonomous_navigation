@@ -67,7 +67,7 @@ def a_star(start, goal, grid):
 fig, ax = plt.subplots(figsize=(6, 6))
 img = ax.imshow(occupancy_grid.T, origin='lower', cmap='gray_r')
 robot_dot, = ax.plot([], [], 'bo', label='Robot')
-goal_dot, = ax.plot(goal_pos[0], goal_pos[1], 'ro', label='Goal')
+goal_dot, = ax.plot([goal_pos[0]], [goal_pos[1]], 'ro', label='Goal')
 path_line, = ax.plot([], [], 'g-', linewidth=2, label='Path')
 obstacle_pts = [ax.plot(ox, oy, 'ks')[0] for ox, oy in obstacles]
 plt.legend()
@@ -92,7 +92,7 @@ def update(frame):
     else:
         path_line.set_data([], [])
 
-    robot_dot.set_data(robot_pos[0], robot_pos[1])
+    robot_dot.set_data([robot_pos[0]], [robot_pos[1]])
     img.set_data(occupancy_grid.T)
     return [img, robot_dot, path_line]
 
