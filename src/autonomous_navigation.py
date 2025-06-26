@@ -4,122 +4,137 @@ import matplotlib.animation as animation
 import tkinter as tk
 from tkinter import messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import heapq
 
 # Grid setup
-GRID_SIZE = (50, 50)
-full_map = np.zeros(GRID_SIZE)
-known_map = np.full(GRID_SIZE, 0.5)
+GRID_SIZE = (50, 50)  # (columns, rows)
+free, obstacle = 0, 1
+full_map = np.zeros(GRID_SIZE, dtype=int)
 
-# Start and goal
-robot_pos = [10, 10]
-goal_pos = [40, 40]
-robot_history = []
+# Define more elaborate static obstacles (warehouse-like shelves)
+def create_obstacles():
+    obs = set()
+    # Horizontal shelves at y = 10,20,30,40 with aisle gaps every 10 cols
+    for y in (10, 20, 30, 40):
+        for x in range(5, 45):
+            if x % 10 not in (0, 5):  # leave gaps at columns 5 and 15,25...
+                obs.add((x, y))
+    # Vertical shelves at x = 15,30 with aisle gaps every 10 rows
+    for x in (15, 30):
+        for y in range(5, 45):
+            if y % 10 not in (0, 5):
+                obs.add((x, y))
+    # Additional L-shaped barrier for complexity
+    for x in range(20, 28): obs.add((x, 5))
+    for y in range(5, 15): obs.add((27, y))
+    return obs
 
-# Add complex static obstacles
-obstacles = set()
-# Vertical wall with 3 gaps
-for y in range(10, 40):
-    if y not in (18, 25, 32):
-        obstacles.add((25, y))
-# Horizontal wall
-for x in range(5, 45):
-    if x not in (12, 26, 38):
-        obstacles.add((x, 15))
-# L-shaped barrier
-for x in range(30, 35):
-    obstacles.add((x, 35))
-for y in range(35, 45):
-    obstacles.add((30, y))
-
+obstacles = create_obstacles()
 for ox, oy in obstacles:
-    full_map[ox, oy] = 1.0
+    full_map[ox, oy] = obstacle
 
-# GUI
+# A* pathfinding
+def a_star(start, goal, grid):
+    rows, cols = grid.shape
+    def heuristic(a, b): return np.hypot(a[0]-b[0], a[1]-b[1])
+    open_set = [(heuristic(start, goal), 0, start)]
+    came_from = {}
+    g_score = {start: 0}
+    visited = set()
+    while open_set:
+        _, g, current = heapq.heappop(open_set)
+        if current == goal:
+            # reconstruct path
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            return path[::-1]
+        if current in visited:
+            continue
+        visited.add(current)
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+            nx, ny = current[0]+dx, current[1]+dy
+            if 0 <= nx < rows and 0 <= ny < cols and grid[nx, ny] == free:
+                tentative_g = g + np.hypot(dx, dy)
+                neighbor = (nx, ny)
+                if tentative_g < g_score.get(neighbor, float('inf')):
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f = tentative_g + heuristic(neighbor, goal)
+                    heapq.heappush(open_set, (f, tentative_g, neighbor))
+    return []
+
+# Initialize robot and goal
+robot_pos = (5, 5)
+goal_pos = (45, 45)
+current_path = []
+
+# GUI setup
 root = tk.Tk()
 root.title("Autonomous Navigation")
-
 messagebox.showinfo("Instructions",
-    "🔵 Robot (blue)\n🔴 Goal (red)\n🟢 Path (green)\nClick 'Change Goal' to relocate goal")
+    "🔵 Robot (blue)\n🔴 Goal (red)\n🟫 Obstacles (black)\nClick 'Change Goal' to choose new destination")
 
-fig, ax = plt.subplots(figsize=(6, 6))
+# Plot setup
+fig, ax = plt.subplots(figsize=(6,6))
 canvas = FigureCanvasTkAgg(fig, master=root)
 canvas.get_tk_widget().pack()
-
-img = ax.imshow(known_map.T, origin='lower', cmap='gray_r')
+# Draw obstacles
+ox, oy = zip(*obstacles)
+ax.plot(ox, oy, 'ks', markersize=5, label='Obstacle')
+# Initial plot elements
 robot_dot, = ax.plot([], [], 'bo', label='Robot')
-goal_dot, = ax.plot([goal_pos[0]], [goal_pos[1]], 'ro', label='Goal')
+goal_dot, = ax.plot([], [], 'ro', label='Goal')
 path_line, = ax.plot([], [], 'g-', linewidth=2, label='Path')
-
-# After defining `obstacles`
-obs_x, obs_y = zip(*obstacles)
-ax.plot(obs_x, obs_y, 'ks', markersize=5, label='Obstacle')  # 'ks' = black squares
-
+# Fix axis limits so goal stays in view
+ax.set_xlim(-1, GRID_SIZE[0])
+ax.set_ylim(-1, GRID_SIZE[1])
+ax.set_aspect('equal')
 plt.legend()
 
-btn_frame = tk.Frame(root)
-btn_frame.pack(pady=5)
-
-# Change goal location
+# Change goal and replanning
 def change_goal():
-    global goal_pos
+    global goal_pos, current_path
     while True:
-        goal_pos = [np.random.randint(0, GRID_SIZE[0]), np.random.randint(0, GRID_SIZE[1])]
-        if full_map[goal_pos[0], goal_pos[1]] == 0:
+        x, y = np.random.randint(0, GRID_SIZE[0]), np.random.randint(0, GRID_SIZE[1])
+        if full_map[x, y] == free:
+            goal_pos = (x, y)
             break
     goal_dot.set_data([goal_pos[0]], [goal_pos[1]])
-    print(f"🎯 New goal: {goal_pos}")
+    # recompute path
+    current_path = a_star(robot_pos, goal_pos, full_map)
+    if not current_path:
+        print("⚠️ No path found to new goal")
+    else:
+        print(f"🔄 Path length: {len(current_path)}")
+    # redraw canvas
+    ax.figure.canvas.draw_idle()
 
-tk.Button(btn_frame, text="Change Goal", command=change_goal).pack()
+tk.Button(root, text='Change Goal', command=change_goal).pack(pady=5)
 
-# Find valid 8-direction neighbors
-def get_neighbors(pos):
-    x, y = pos
-    directions = [
-        (-1, 0), (1, 0), (0, -1), (0, 1),
-        (-1, -1), (-1, 1), (1, -1), (1, 1)
-    ]
-    neighbors = []
-    for dx, dy in directions:
-        nx, ny = x + dx, y + dy
-        if 0 <= nx < GRID_SIZE[0] and 0 <= ny < GRID_SIZE[1]:
-            if full_map[nx, ny] == 0:
-                neighbors.append((nx, ny))
-    return neighbors
-
-# Choose next move greedily toward goal
-def choose_step():
-    current = tuple(robot_pos)
-    neighbors = get_neighbors(current)
-    if not neighbors:
-        return current
-    # Sort neighbors by distance to goal (greedy)
-    neighbors.sort(key=lambda n: np.linalg.norm(np.array(n) - np.array(goal_pos)))
-    for next_pos in neighbors:
-        if next_pos not in robot_history:  # Avoid cycles
-            return next_pos
-    return current  # No good move found
-
-# Animation init
+# Animation initialization
 def init():
-    img.set_data(known_map.T)
-    robot_dot.set_data([], [])
-    path_line.set_data([], [])
-    return [img, robot_dot, path_line]
-
-# Frame update
-def update(frame):
-    if tuple(robot_pos) == tuple(goal_pos):
-        return [img, robot_dot, path_line]
-
-    next_pos = choose_step()
-    if next_pos != tuple(robot_pos):
-        robot_pos[0], robot_pos[1] = next_pos
-        robot_history.append(tuple(robot_pos))
-
-    hx, hy = zip(*robot_history)
-    path_line.set_data(hx, hy)
+    global current_path
     robot_dot.set_data([robot_pos[0]], [robot_pos[1]])
-    return [img, robot_dot, path_line]
+    goal_dot.set_data([goal_pos[0]], [goal_pos[1]])
+    current_path = a_star(robot_pos, goal_pos, full_map)
+    path_line.set_data([], [])
+    return [robot_dot, goal_dot, path_line]
 
-ani = animation.FuncAnimation(fig, update, init_func=init, frames=1000, interval=100, blit=False)
+# Frame update: step along A* path
+
+def update(frame):
+    global robot_pos, current_path
+    if current_path:
+        robot_pos = current_path.pop(0)
+    robot_dot.set_data([robot_pos[0]], [robot_pos[1]])
+    if current_path:
+        xs, ys = zip(*([robot_pos] + current_path))
+        path_line.set_data(xs, ys)
+    return [robot_dot, path_line]
+
+ani = animation.FuncAnimation(
+    fig, update, init_func=init, frames=1000, interval=100, blit=False
+)
 root.mainloop()
