@@ -1,5 +1,4 @@
-# autonomous_navigation
-This is a live simulation of autonomous robot navigation carried out programmatically.
+
 # Autonomous Navigation (Live Simulation)
 
 This is a live simulation of autonomous robot navigation using:
